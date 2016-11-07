@@ -18,14 +18,6 @@ Api.addRoute 'publicRooms', authRequired: true,
 		rooms = RocketChat.models.Rooms.findByType('c', { sort: { msgs:-1 } }).fetch()
 		status: 'success', rooms: rooms
 
-###
-@api {get} /joinedRooms Get joined rooms.
-###
-Api.addRoute 'joinedRooms', authRequired: true,
-	get: ->
-		rooms = RocketChat.models.Rooms.findByContainigUsername(@user.username).fetch()
-		status: 'success', rooms: rooms
-
 # join a room
 Api.addRoute 'rooms/:id/join', authRequired: true,
 	post: ->
@@ -41,27 +33,12 @@ Api.addRoute 'rooms/:id/leave', authRequired: true,
 		status: 'success'   # need to handle error
 
 
-###
-@api {get} /rooms/:id/messages?skip=:skip&limit=:limit Get messages in a room.
-@apiParam {Number} id         Room ID
-@apiParam {Number} [skip=0]   Number of results to skip at the beginning
-@apiParam {Number} [limit=50] Maximum number of results to return
-###
+# get messages in a room
 Api.addRoute 'rooms/:id/messages', authRequired: true,
 	get: ->
 		try
-			rid = @urlParams.id
-			# `variable | 0` means converting to int
-			skip = @queryParams.skip | 0 or 0
-			limit = @queryParams.limit | 0 or 50
-			limit = 50 if limit > 50
-			if Meteor.call('canAccessRoom', rid, this.userId)
-				msgs = RocketChat.models.Messages.findVisibleByRoomId(rid,
-					sort:
-						ts: -1
-					skip: skip
-					limit: limit
-				).fetch()
+			if Meteor.call('canAccessRoom', @urlParams.id, this.userId)
+				msgs = RocketChat.models.Messages.findVisibleByRoomId(@urlParams.id, {sort: {ts: -1}, limit: 50}).fetch()
 				status: 'success', messages: msgs
 			else
 				statusCode: 403   # forbidden
@@ -80,19 +57,6 @@ Api.addRoute 'rooms/:id/send', authRequired: true,
 			Meteor.call('sendMessage', {msg: this.bodyParams.msg, rid: @urlParams.id} )
 		status: 'success'	#need to handle error
 
-# get list of online users in a room
-Api.addRoute 'rooms/:id/online', authRequired: true,
-	get: ->
-		room = RocketChat.models.Rooms.findOneById @urlParams.id
-		online = RocketChat.models.Users.findUsersNotOffline(fields:
-			username: 1
-			status: 1).fetch()
-		onlineInRoom = []
-		for user, i in online
-			if room.usernames.indexOf(user.username) != -1
-				onlineInRoom.push user.username
-
-		status: 'success', online: onlineInRoom
 
 # validate an array of users
 Api.testapiValidateUsers =  (users) ->
@@ -122,23 +86,23 @@ NOTE:   remove room is NOT recommended; use Meteor.reset() to clear db and re-se
 @apiParam {json} rooms An array of users in the body of the POST.
 @apiParamExample {json} POST Request Body example:
   {
-    'users':[ {'email': 'user1@user1.com',
-               'name': 'user1',
-               'pass': 'abc123' },
-              {'email': 'user2@user2.com',
-               'name': 'user2',
-               'pass': 'abc123'},
-              ...
-            ]
+	'users':[ {'email': 'user1@user1.com',
+			   'name': 'user1',
+			   'pass': 'abc123' },
+			  {'email': 'user2@user2.com',
+			   'name': 'user2',
+			   'pass': 'abc123'},
+			  ...
+			]
   }
 @apiSuccess {json} ids An array of IDs of the registered users.
 @apiSuccessExample {json} Success-Response:
   HTTP/1.1 200 OK
   {
-    'ids':[ {'uid': 'uid_1'},
-            {'uid': 'uid_2'},
-            ...
-    ]
+	'ids':[ {'uid': 'uid_1'},
+			{'uid': 'uid_2'},
+			...
+	]
   }
 ###
 Api.addRoute 'bulk/register', authRequired: true,
@@ -196,14 +160,14 @@ Api.testapiValidateRooms =  (rooms) ->
 @apiParam {json} rooms An array of rooms in the body of the POST. 'name' is room name, 'members' is array of usernames
 @apiParamExample {json} POST Request Body example:
   {
-    'rooms':[ {'name': 'room1',
-               'members': ['user1', 'user2']
-              },
-              {'name': 'room2',
-               'members': ['user1', 'user2', 'user3']
-              }
-              ...
-            ]
+	'rooms':[ {'name': 'room1',
+			   'members': ['user1', 'user2']
+		  },
+		  {'name': 'room2',
+			   'members': ['user1', 'user2', 'user3']
+			  }
+			  ...
+			]
   }
 @apiDescription  Caller must have 'testagent' or 'adminautomation' role.
 NOTE:   remove room is NOT recommended; use Meteor.reset() to clear db and re-seed instead
@@ -212,10 +176,10 @@ NOTE:   remove room is NOT recommended; use Meteor.reset() to clear db and re-se
 @apiSuccessExample {json} Success-Response:
   HTTP/1.1 200 OK
   {
-    'ids':[ {'rid': 'rid_1'},
-            {'rid': 'rid_2'},
-            ...
-    ]
+	'ids':[ {'rid': 'rid_1'},
+			{'rid': 'rid_2'},
+			...
+	]
   }
 ###
 Api.addRoute 'bulk/createRoom', authRequired: true,
@@ -226,7 +190,10 @@ Api.addRoute 'bulk/createRoom', authRequired: true,
 			# user must also have create-c permission because
 			# createChannel method requires it
 			if RocketChat.authz.hasPermission(@userId, 'bulk-create-c')
-				try
+				try  
+					#data['rid'] = ids[0].rid
+					#data['username'] = @bodyParams.rooms[0].name
+					
 					this.response.setTimeout (1000 * @bodyParams.rooms.length)
 					Api.testapiValidateRooms @bodyParams.rooms
 					ids = []
@@ -240,3 +207,113 @@ Api.addRoute 'bulk/createRoom', authRequired: true,
 				console.log '[restapi] bulk/createRoom -> '.red, "User does not have 'bulk-create-c' permission"
 				statusCode: 403
 				body: status: 'error', message: 'You do not have permission to do this'
+
+
+   
+
+Api.addRoute 'bulk/createPrivateRoom', authRequired: true,
+	post:
+		action: ->
+			if RocketChat.authz.hasPermission(@userId, 'bulk-create-c')
+				console.log '@bodyParams.rooms', @bodyParams.rooms
+				console.log '@userId', @userId
+				try	
+					this.response.setTimeout (1000 * @bodyParams.rooms.length)
+					console.log '111'
+					Api.testapiValidateRooms @bodyParams.rooms
+					console.log '222'
+					ids = []
+					user = []
+					for incoming,i in @bodyParams.rooms
+						Meteor.runAsUser this.userId, () =>
+							ids[i] = Meteor.call 'createPrivateGroup', incoming.name, incoming.members
+							console.log 'ids', ids
+							incoming.members = ['sXxRBmsnjXn5N3tvf', 'k9LxwCNXxivhmawfC']
+							for j in incoming.members
+								user[i] = Meteor.call 'addUserToRoom', {rid: ids[i].rid, username: j}
+							# Meteor.call('sendMessage', {msg: this.bodyParams.msg, rid: dm.rid} )
+							#addRoomModerator
+					console.log '3', ids
+					# console.log '4', user
+					status: 'success', ids: ids
+					return ids
+					console.log 'try'
+				catch e
+					console.log 'catch', e
+					statusCode: 400
+					body: status: 'fail', message: e.name + ' :: ' + e.message
+
+			else
+				console.log '[restapi] bulk/createPrivateRoom -> '.red, "User does not have 'create-p' permission"
+				statusCode: 403
+				body: status: 'error', message: 'You do not have permission to do this'
+			console.log 'after iffff'
+
+
+
+Api.addRoute 'bulk/updatePrivateRoom', authRequired: true,
+	put:
+		action: ->
+			console.log 'before permission'
+			# user must also have create-p permission
+			if RocketChat.authz.hasPermission(@userId, 'edit-room')
+				console.log 'after permission'
+				try
+					this.response.setTimeout (1000 * @bodyParams.rooms.length)
+					Api.testapiValidateRoomName @bodyParams.rooms
+					ids = []
+					for incoming, i in @bodyParams.rooms
+						console.log '111', incoming.id ,incoming.name
+						Meteor.runAsUser this.userId, () =>
+							(ids[i] = Meteor.call 'updateRoom', {_id: incoming.id, name: incoming.name, memebers: incoming.members}) 
+							console.log ids[i]
+					status: 'success', ids: ids # need to handle error
+					console.log ids
+					return ids
+				catch e
+					statusCode: 400 # bad request or other error
+					body: status: 'fail', message: e.name + ' :: ' + e.message
+			else
+				console.log '[restapi] bulk/updatePrivateRoom -> '.red, "user does not have 'edit-room' permission"
+
+
+
+# validate an array of rooms
+Api.testapiValidateRoomName =  (rooms) ->
+	for room, i in rooms
+		if room.name?
+			try
+				nameValidation = new RegExp '^' + RocketChat.settings.get('UTF8_Names_Validation') + '$', 'i'
+			catch
+				nameValidation = new RegExp '^[0-9a-zA-Z-_.]+$', 'i'
+
+			if nameValidation.test room.name
+				continue
+		throw new Meteor.Error 'invalid-room-record', "[restapi] bulk/createRoom -> record #" + i + " is invalid"
+	return
+
+Api.addRoute 'bulk/updateRoomName', authRequired: true,
+	put:
+		# restivus 0.8.4 does not support alanning:roles using groups
+		#roleRequired: ['testagent', 'adminautomation']
+		action: ->
+			# user must also have create-c permission because
+			# createChannel method requires it
+			if RocketChat.authz.hasPermission(@userId, 'bulk-create-c')
+				try
+					this.response.setTimeout (1000 * @bodyParams.rooms.length)
+					Api.testapiValidateRoomName @bodyParams.rooms
+					ids = []
+					for incoming,i in @bodyParams.rooms
+						Meteor.runAsUser this.userId, () =>
+							(ids[i] = Meteor.call 'updateChannelName', incoming.id, incoming.name)
+					status: 'success', ids: ids   # need to handle error
+				catch e
+					statusCode: 400    # bad request or other errors
+					body: status: 'fail', message: e.name + ' :: ' + e.message
+			else
+				console.log '[restapi] bulk/updateRoom -> '.red, "User does not have 'bulk-create-c' permission"
+				statusCode: 403
+				body: status: 'error', message: 'You do not have permission to do this'
+
+
