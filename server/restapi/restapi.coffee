@@ -138,9 +138,10 @@ Api.addRoute 'bulk/register', authRequired: true,
 # validate an array of rooms
 Api.testapiValidateRooms =  (rooms) ->
 	for room, i in rooms
+		console.log room
 		if room.name?
 			if room.members?
-				if room.members.length > 1
+				if room.members.length > 0
 					try
 						nameValidation = new RegExp '^' + RocketChat.settings.get('UTF8_Names_Validation') + '$', 'i'
 					catch
@@ -226,9 +227,9 @@ Api.addRoute 'bulk/createPrivateRoom', authRequired: true,
 					user = []
 					for incoming,i in @bodyParams.rooms
 						Meteor.runAsUser this.userId, () =>
-							ids[i] = Meteor.call 'createPrivateGroup', incoming.name, incoming.members
+							ids[i] = Meteor.call 'createPrivateGroup', incoming.name, []
 							console.log 'ids', ids
-							incoming.members = ['sXxRBmsnjXn5N3tvf', 'k9LxwCNXxivhmawfC']
+							#incoming.members = ['rNeBPumaQBqHMjoSa', 'w2bdoEjmheDHsz7Mn']
 							for j in incoming.members
 								user[i] = Meteor.call 'addUserToRoom', {rid: ids[i].rid, username: j}
 							# Meteor.call('sendMessage', {msg: this.bodyParams.msg, rid: dm.rid} )
@@ -316,4 +317,31 @@ Api.addRoute 'bulk/updateRoomName', authRequired: true,
 				statusCode: 403
 				body: status: 'error', message: 'You do not have permission to do this'
 
+
+# add member to room -  POST body should be { "member" : "memberId"}
+Api.addRoute 'rooms/:id/addMember', authRequired: true,
+	post: ->
+		try
+			Meteor.runAsUser this.userId, () =>
+				console.log @bodyParams.member
+				Meteor.call 'addUserToRoom', {rid: @urlParams.id, username: @bodyParams.member}
+			status: 'success'	#need to handle error
+		catch e
+			console.log '[restapi] rooms/:id/addMember -> '.red
+			statusCode: 400    # bad request or other errors
+			body: status: 'fail', message: e.name + ' :: ' + e.message
+
+
+# remove member from room -  POST body should be { "member" : "memberId"}
+Api.addRoute 'rooms/:id/removeMember', authRequired: true,
+	post: ->
+		try
+			Meteor.runAsUser this.userId, () =>
+				console.log @bodyParams.member
+				Meteor.call 'removeUserFromRoom', {rid: @urlParams.id, username: @bodyParams.member}
+			status: 'success'	#need to handle error
+		catch e
+			console.log '[restapi] rooms/:id/removeMember -> '.red
+			statusCode: 400    # bad request or other errors
+			body: status: 'fail', message: e.name + ' :: ' + e.message
 
